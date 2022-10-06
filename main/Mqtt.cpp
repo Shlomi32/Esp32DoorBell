@@ -1,35 +1,27 @@
-/*
- * SPDX-FileCopyrightText: 2010-2022 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: CC0-1.0
- */
+#include <iostream>
+#include <sstream>
 
-#include <stdio.h>
-#include "sdkconfig.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_chip_info.h"
-#include "esp_flash.h"
 #include "esp_log.h"
-#include "esp_chip_info.h"
-#include "mqtt_client.h"
-#include "nvs_flash.h"
 
-#include "wifi.h"
+#include "Mqtt.hpp"
 
-#define LOG_TAG "MAIN"
+Mqtt::Mqtt(std::string ip, std::string port) : m_ip{ip}, m_port{port}
+{
 
-static void log_error_if_nonzero(const char *message, int error_code)
+}
+
+
+void Mqtt::log_error_if_nonzero(const char *message, int error_code)
 {
     if (error_code != 0) {
         ESP_LOGE(LOG_TAG, "Last error %s: 0x%x", message, error_code);
     }
 }
 
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+void Mqtt::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     ESP_LOGD(LOG_TAG, "Event dispatched from event loop base=%s, event_id=%d", base, event_id);
-    esp_mqtt_event_handle_t event = event_data;
+    esp_mqtt_event_handle_t event = static_cast<esp_mqtt_event_handle_t>(event_data);
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
     switch ((esp_mqtt_event_id_t)event_id) {
@@ -86,58 +78,19 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-static void mqtt_app_start(void)
-{
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://192.168.1.14:1883",
-        // .broker.address.port = 1883,
-    };
 
-    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+void Mqtt::Connect()
+{
+    std::stringstream ss{};
+    ss << "mqtt://" << m_ip << ":" << m_port;
+    esp_mqtt_client_config_t mqtt_cfg;
+    mqtt_cfg.broker.address.uri = ss.str().c_str();
+
+    ESP_LOGI(LOG_TAG, "Init");
+    m_client = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
-    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-    esp_mqtt_client_start(client);
-}
-
-
-
-void app_main(void)
-{
-    ESP_LOGI(LOG_TAG, "Hello world");
-
-    esp_log_level_set("*", ESP_LOG_INFO);
-
-    /* Print chip information */
-    esp_chip_info_t chip_info;
-    uint32_t flash_size;
-    esp_chip_info(&chip_info);
-    ESP_LOGI(LOG_TAG,"This is %s chip with %d CPU core(s), WiFi%s%s, ",
-           CONFIG_IDF_TARGET,
-           chip_info.cores,
-           (chip_info.features & CHIP_FEATURE_BT) ? "/BT" : "",
-           (chip_info.features & CHIP_FEATURE_BLE) ? "/BLE" : "");
-
-    ESP_LOGI(LOG_TAG,"silicon revision %d, ", chip_info.revision);
-    if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
-        printf("Get flash size failed");
-        return;
-    }
-
-    ESP_LOGI(LOG_TAG,"%uMB %s flash\n", flash_size / (1024 * 1024),
-           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
-
-    ESP_LOGI(LOG_TAG,"Minimum free heap size: %d bytes\n", esp_get_minimum_free_heap_size());
-
-    //Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    wifi_init_sta();
-
-    mqtt_app_start();
-
+    ESP_LOGI(LOG_TAG, "Register events");
+    esp_mqtt_client_register_event(m_client, static_cast<esp_mqtt_event_id_t>(ESP_EVENT_ANY_ID), mqtt_event_handler, NULL);
+    ESP_LOGI(LOG_TAG, "Start");
+    esp_mqtt_client_start(m_client);
 }
