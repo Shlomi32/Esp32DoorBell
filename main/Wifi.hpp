@@ -7,7 +7,9 @@
 class WifiHandler
 {
 public:
-    WifiHandler(std::string ssid, std::string pass) : m_ssid{ssid}, m_pass{pass} {}
+    WifiHandler(std::string ssid, std::string pass);
+    ~WifiHandler();
+    
     void wifi_init_sta(void);
 private:
     static void event_handler(void* arg, esp_event_base_t event_base,
@@ -19,6 +21,7 @@ private:
     static constexpr char EXAMPLE_ESP_WIFI_PASS[64] = "pedro1989";
     static constexpr int EXAMPLE_ESP_MAXIMUM_RETRY = 5;
     
-    
-    static constexpr char TAG[] = "wifi station";
+    static constexpr char TAG[] = "WIFI";
+
+    esp_event_handler_instance_t lost_ip;
 };

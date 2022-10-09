@@ -32,6 +32,17 @@ static EventGroupHandle_t s_wifi_event_group;
 
 static int s_retry_num = 0;
 
+WifiHandler::WifiHandler(std::string ssid, std::string pass) : m_ssid{ssid}, m_pass{pass} 
+{
+}
+
+WifiHandler::~WifiHandler()
+{
+    esp_event_handler_instance_unregister(IP_EVENT, 
+                                        IP_EVENT_STA_LOST_IP,
+                                        &lost_ip);
+}
+
 void WifiHandler::event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -51,6 +62,9 @@ void WifiHandler::event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP)
+    {
+        ESP_LOGW(TAG, "lost IP");
     }
 }
 
@@ -78,6 +92,11 @@ void WifiHandler::wifi_init_sta(void)
                                                         &event_handler,
                                                         NULL,
                                                         &instance_got_ip));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                            IP_EVENT_STA_LOST_IP,
+                                            &event_handler,
+                                            NULL,
+                                            &lost_ip));
 
     wifi_config_t wifi_config = {};
     memcpy(wifi_config.sta.ssid, m_ssid.c_str(), m_ssid.length());
@@ -121,4 +140,5 @@ void WifiHandler::wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
     vEventGroupDelete(s_wifi_event_group);
+
 }
