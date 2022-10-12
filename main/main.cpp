@@ -18,27 +18,17 @@
 #include "ChipInfo.hpp"
 #include "GpioInput.hpp"
 #include "GpioOutput.hpp"
+#include "MqttHandlers.hpp"
 
 #define LOG_TAG "MAIN"
 #define BTN GPIO_NUM_13
 
 #define DOOR_OPEN_TIME 3
-#define DOOR_RELAY GPIO_NUM_23
+gpio_num_t DOOR_RELAY = GPIO_NUM_23;
 
 TaskHandle_t mqttPublisherTask = NULL;
-TaskHandle_t doorOpenerTask = NULL;
+TaskHandle_t gateOpenerTask = NULL;
 auto mqttClient = std::make_shared<Mqtt>("192.168.1.14", "1883");
-
-class doorHandler : public Mqtt::TopicHandler
-{
-public:
-  virtual void handle(std::string topic, std::string msg)
-  {
-    vTaskResume(doorOpenerTask);
-  }
-};
-
-GpioOutput door(DOOR_RELAY);
 
 void KeyPressed(void *args)
 {
@@ -54,25 +44,26 @@ void KeyPressed(void *args)
   }
 }
 
-void DoorOpener(void *args)
+void GateOpener(void *args)
 {
+  GpioOutput relay(*(static_cast<gpio_num_t *>(args)));
   while (1)
   {
     vTaskSuspend(NULL);
 
     ESP_LOGI(LOG_TAG, "Open door");
-    door.SetLevel(1);
+    relay.SetLevel(1);
 
     vTaskDelay((DOOR_OPEN_TIME * 1000) / portTICK_PERIOD_MS);
-    door.SetLevel(0);
+    relay.SetLevel(0);
     ESP_LOGI(LOG_TAG, "Door locked");
-
   }
 }
 
 void isr_handler(void *args)
 {
-  xTaskResumeFromISR(mqttPublisherTask);
+  TaskHandle_t mqttPushlisher = static_cast<TaskHandle_t>(args);
+  xTaskResumeFromISR(mqttPushlisher);
 }
 
 extern "C" void app_main(void)
@@ -89,18 +80,17 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-
-    auto btn = std::make_unique<GpioInput>(BTN);
-    btn->SetIsrhandler(isr_handler, NULL);
-    
-    auto wifi = std::make_unique<WifiHandler>("Vainberger", "pedro1989");
-    // auto wifi = std::make_unique<WifiHandler>("Shlomi", "0544715884");
-    wifi->wifi_init_sta();
-
-    // auto mqttClient = std::make_shared<Mqtt>("192.168.1.14", "1883");
+    // Connect to wifi
+    WifiHandler::Create("Vainberger", "pedro1989");
+    WifiHandler::GetInstance().wifi_init_sta();    
 
     xTaskCreate(KeyPressed, "DoorOpenRequest", 4096, mqttClient.get(), 2, &mqttPublisherTask);
-    xTaskCreate(DoorOpener, "DoorOpener", 2024, NULL, 1, &doorOpenerTask);
-    mqttClient->Subscribe("/doorBell/openDoor", std::make_unique<doorHandler>());
+    xTaskCreate(GateOpener, "GateOpener", 2024, &DOOR_RELAY, 1, &gateOpenerTask);
+    
+    auto btn = std::make_unique<GpioInput>(BTN);
+    btn->SetIsrhandler(isr_handler, mqttPublisherTask);
+    
+    auto mqttClient = std::make_shared<Mqtt>("192.168.1.14", "1883");
+    mqttClient->Subscribe("/garden/openGate", std::make_unique<TaskResumer>(&gateOpenerTask));
     mqttClient->Connect();
 }
