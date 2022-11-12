@@ -6,7 +6,7 @@
 
 #include "Mqtt.hpp"
 
-std::map<std::string, std::unique_ptr<Mqtt::TopicHandler>> Mqtt::m_handlers;
+std::map<std::string, std::vector<std::unique_ptr<Mqtt::TopicHandler>>> Mqtt::m_handlers;
 
 Mqtt::Mqtt(std::string ip, std::string port) : m_ip{ip}, m_port{port}
 {
@@ -74,7 +74,9 @@ void Mqtt::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t
         if (Mqtt::m_handlers.find(topic) != Mqtt::m_handlers.end())
         {
             ESP_LOGW(LOG_TAG,"Calling handler");
-            Mqtt::m_handlers[topic]->handle(topic, data);
+            for (auto &handler : Mqtt::m_handlers[topic]) {
+                handler->handle(topic, data);
+            }
         }
         else
         {
@@ -129,5 +131,5 @@ int Mqtt::Publish(std::string topic, std::string msg)
 void Mqtt::Subscribe(std::string topic, std::unique_ptr<TopicHandler> handler)
 {
     ESP_LOGI(LOG_TAG, "Register handler to %s", topic.c_str());
-    m_handlers[topic] = std::move(handler);
+    m_handlers[topic].push_back(std::move(handler));
 }
