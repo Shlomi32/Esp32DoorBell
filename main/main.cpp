@@ -8,6 +8,7 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
@@ -25,24 +26,27 @@
 
 #define DOOR_OPEN_TIME 3
 gpio_num_t DOOR_RELAY = GPIO_NUM_23;
-gpio_num_t PRIMARY_GARAGE_DOOR_RELAY = GPIO_NUM_22;
-gpio_num_t SECONDARY_GARAGE_DOOR_RELAY = GPIO_NUM_21;
+gpio_num_t PRIMARY_GARAGE_DOOR_RELAY = GPIO_NUM_21;
+gpio_num_t SECONDARY_GARAGE_DOOR_RELAY = GPIO_NUM_22;
 
-TaskHandle_t mqttPublisherTask = NULL;
+TaskHandle_t keyPressedTask = NULL;
 TaskHandle_t gateOpenerTask = NULL;
 TaskHandle_t PrimaryGarageOpenerTask = NULL;
 TaskHandle_t SecondaryGarageOpenerTask = NULL;
+TaskHandle_t mqttPublisherTask = NULL;
+
+QueueHandle_t mqttPublisherQueue = NULL;
+
+std::unique_ptr<Mqtt> mqttClient = NULL;
 
 void KeyPressed(void *args)
 {
-  Mqtt *mqttClient = static_cast<Mqtt *>(args);
   while (1)
   {
     vTaskSuspend(NULL);
-    const std::string topic = "/doorBell/button";
-    const std::string msg = "Pressed";
-    ESP_LOGI(LOG_TAG, "Publish mqtt msg %s - %s", topic.c_str(), msg.c_str());
-    mqttClient->Publish(topic.c_str(), msg.c_str());
+    Mqtt::mqttMsg msg = {.topic="/garden/doorBell", .data="Pressed"};
+    ESP_LOGI(LOG_TAG, "Publish mqtt msg %s - %s", msg.topic, msg.data);
+    mqttClient->Publish(msg, true);
 
     vTaskDelay(2000 / portTICK_PERIOD_MS);
   }
@@ -56,6 +60,8 @@ void GateOpener(void *args)
     vTaskSuspend(NULL);
 
     ESP_LOGI(LOG_TAG, "Open door");
+    Mqtt::mqttMsg msg = {.topic="/garden/openGate/ack", .data=""};
+    mqttClient->Publish(msg);
     relay.SetLevel(1);
 
     vTaskDelay((DOOR_OPEN_TIME * 1000) / portTICK_PERIOD_MS);
@@ -88,17 +94,18 @@ extern "C" void app_main(void)
     WifiHandler::Create("Vainberger", "pedro1989");
     WifiHandler::GetInstance().wifi_init_sta();    
 
-    static auto mqttClient = std::make_shared<Mqtt>("192.168.1.14", "1883");
-    xTaskCreate(KeyPressed, "DoorOpenRequest", 8192, mqttClient.get(), 2, &mqttPublisherTask);
+    mqttClient = std::make_unique<Mqtt>("192.168.1.14", "1883");
+
+    xTaskCreate(KeyPressed, "DoorOpenRequest", 8192, NULL, 2, &keyPressedTask);
     xTaskCreate(GateOpener, "GateOpener", 2048, &DOOR_RELAY, 1, &gateOpenerTask);
     xTaskCreate(GateOpener, "PrimaryGarageOpener", 2048, &PRIMARY_GARAGE_DOOR_RELAY, 1, &PrimaryGarageOpenerTask);
     xTaskCreate(GateOpener, "SecondaryGarageDoor", 2048, &SECONDARY_GARAGE_DOOR_RELAY, 1, &SecondaryGarageOpenerTask);
     
     static auto btn = std::make_unique<GpioInput>(BTN);
-    btn->SetIsrhandler(isr_handler, &mqttPublisherTask);
+    btn->SetIsrhandler(isr_handler, &keyPressedTask);
     
     mqttClient->Subscribe("/garden/openGate/Walking", std::make_unique<TaskResumer>(&gateOpenerTask));
     mqttClient->Subscribe("/garden/openGate/Primary", std::make_unique<TaskResumer>(&PrimaryGarageOpenerTask));
-    mqttClient->Subscribe("/garden/openGate/Secondary", std::make_unique<TaskResumer>(&PrimaryGarageOpenerTask));
+    mqttClient->Subscribe("/garden/openGate/Secondary", std::make_unique<TaskResumer>(&SecondaryGarageOpenerTask));
     mqttClient->Connect();
 }

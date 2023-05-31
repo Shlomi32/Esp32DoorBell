@@ -10,6 +10,8 @@ public:
     {
         esp_rom_gpio_pad_select_gpio(m_gpio_num);
         gpio_set_direction(m_gpio_num, m_gpio_mode);
+        gpio_pulldown_en(m_gpio_num);
+        gpio_pullup_dis(m_gpio_num);
     }
     
 protected:

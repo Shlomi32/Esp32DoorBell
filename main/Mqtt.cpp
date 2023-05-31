@@ -3,14 +3,36 @@
 #include <string>
 
 #include "esp_log.h"
-
 #include "Mqtt.hpp"
+
 
 std::map<std::string, std::vector<std::unique_ptr<Mqtt::TopicHandler>>> Mqtt::m_handlers;
 
+void Mqtt::publisherTaskhandler(void *args)
+{
+    Mqtt *mqtt = static_cast<Mqtt *>(args);
+    while(1)
+    {
+        if (mqtt->m_client) {
+            mqttMsg msg;
+            xQueueReceive(mqtt->m_msgQueue, &msg, portMAX_DELAY);
+            if (msg.topic) {
+                ESP_LOGI(Mqtt::LOG_TAG, "Going to publish mgs topic:%s, data=%s",msg.topic, msg.data ? msg.data : "null");
+                esp_mqtt_client_publish(mqtt->m_client, msg.topic, msg.data, msg.data ? strlen(msg.data) : 0, 0, 0);
+            }
+        }
+    }
+}
 Mqtt::Mqtt(std::string ip, std::string port) : m_ip{ip}, m_port{port}
 {
+    m_msgQueue = xQueueCreate(10, sizeof(Mqtt::mqttMsg));
+    xTaskCreate(publisherTaskhandler, "mqttPublisher", 2048, this, 3, &m_publisherTask);
+}
 
+Mqtt::~Mqtt()
+{
+    vTaskDelete(m_publisherTask);
+    vQueueDelete(m_msgQueue);
 }
 
 void Mqtt::log_error_if_nonzero(const char *message, int error_code)
@@ -67,9 +89,9 @@ void Mqtt::mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t
         ESP_LOGI(LOG_TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
         break;
     case MQTT_EVENT_DATA:
-        ESP_LOGI(LOG_TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
+        ESP_LOGI(LOG_TAG, "MQTT_EVENT_DATA:");
+        printf("\tTOPIC=%.*s\r\n", event->topic_len, event->topic);
+        printf("\tDATA=%.*s\r\n", event->data_len, event->data);
                 
         if (Mqtt::m_handlers.find(topic) != Mqtt::m_handlers.end())
         {
@@ -117,15 +139,25 @@ void Mqtt::Connect()
     esp_mqtt_client_start(m_client);
 }
 
-int Mqtt::Publish(std::string topic, std::string msg)
+int Mqtt::Publish(mqttMsg msg, bool isISR)
 {
     if (!m_client)
     {
         ESP_LOGE(LOG_TAG, "Client not initialized");
         return 0;
     }
-    
-    return esp_mqtt_client_publish(m_client, topic.c_str(), msg.c_str(), msg.length(), 0, 0);
+    if (msg.topic == NULL) {
+        ESP_LOGW(LOG_TAG, "Receive empty topic");
+        return 1;
+    }
+
+    ESP_LOGD(LOG_TAG, "Receive topic %s to publish", msg.topic);
+    if (isISR) {
+        xQueueSendFromISR(m_msgQueue, &msg, 0);
+    } else {
+        xQueueSend(m_msgQueue, &msg, 0);
+    }
+    return 0;
 }
 
 void Mqtt::Subscribe(std::string topic, std::unique_ptr<TopicHandler> handler)

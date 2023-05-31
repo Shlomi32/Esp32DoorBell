@@ -17,11 +17,18 @@ public:
         virtual void handle(std::string topic, std::string msg) = 0;
     };
 
+    struct mqttMsg
+    {
+        const char *topic = NULL;
+        const char *data = NULL;
+    };
+
     Mqtt(std::string ip, std::string port);
+    ~Mqtt();
 
     void Connect();
 
-    int Publish(std::string topic, std::string msg);
+    int Publish(mqttMsg msg, bool isISR = false);
     void Subscribe(std::string topic, std::unique_ptr<TopicHandler> handler);
 private:
     static constexpr char LOG_TAG[] = "MQTT";
@@ -31,5 +38,8 @@ private:
     esp_mqtt_client_handle_t m_client = NULL;
     static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
     static void log_error_if_nonzero(const char *message, int error_code);
-
+    
+    static void publisherTaskhandler(void *args);
+    QueueHandle_t m_msgQueue;
+    TaskHandle_t m_publisherTask;
 };
